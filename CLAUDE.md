@@ -88,14 +88,44 @@ Results Display
 
 ## Similarity Algorithm
 
-The clustering must account for proportional similarity:
+The clustering must account for proportional similarity with a bias towards applications WITH features.
 
-**Formula Options**:
-- Cosine similarity (normalized)
-- Jaccard coefficient
-- Custom weighted similarity score
+### Proportional Similarity (Primary Method)
 
-**Key**: Normalize by the total number of applicable features per application pair, not the global feature set.
+**Core Principle**: Applications are similar when they share active features, not when they both lack features.
+
+**Algorithm**:
+1. Identify shared active dimensions (both apps have score > 0)
+2. Calculate similarity for shared dimensions only
+3. Apply penalty based on proportion of shared vs. total dimensions
+4. Return 0.0 for apps with no features
+5. Return very low similarity for apps with no shared active dimensions
+
+**Formula**:
+```
+shared_dims = active_dims(app1) ∩ active_dims(app2)
+base_similarity = weighted_avg_of_score_similarity_in_shared_dims
+shared_ratio = len(shared_dims) / len(active_dims(app1) ∪ active_dims(app2))
+final_similarity = base_similarity × (0.5 + 0.5 × shared_ratio)
+```
+
+**Key Features**:
+- Two apps with 5/5 matching dimensions score higher than apps with 50/100 matching
+- Apps with all zeros are NOT similar (score = 0.0)
+- Apps with no shared features get very low similarity (< 0.1)
+- Normalizes by applicable features per pair, not global feature set
+
+### Other Similarity Methods
+
+**Jaccard Similarity**:
+- Based on set intersection/union of active dimensions
+- Ignores score magnitudes
+- Returns 0.0 for apps with no features
+
+**Cosine Similarity**:
+- Traditional vector-based similarity
+- Uses all dimensions (including zeros)
+- Good for comparing score patterns
 
 ## Development Phases
 
@@ -110,9 +140,13 @@ The clustering must account for proportional similarity:
 - Data persistence
 
 ### Phase 3: Clustering & Analysis
-- Implement proportional clustering algorithm
-- Proximity calculation
-- Ranking system
+- ✅ Implement proportional clustering algorithm
+- ✅ Proximity calculation
+- ✅ Ranking system
+- ✅ Automatic cluster determination (3 methods)
+  - Silhouette-optimized (best quality)
+  - Threshold-based (natural groups)
+  - DBSCAN (density-based, finds outliers)
 
 ### Phase 4: Desktop Interface
 - GUI framework selection

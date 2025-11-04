@@ -97,8 +97,30 @@ class TestSimilarityCalculator:
         calc = SimilarityCalculator()
         similarity = calc.proportional_similarity(app1, app2)
 
-        # Should be low similarity since no overlap
-        assert similarity < 0.5
+        # Should be very low similarity since no shared active dimensions
+        assert similarity < 0.1
+
+    def test_proportional_similarity_all_zeros(self):
+        """Test that apps with all zeros are NOT similar."""
+        app1 = Application("App 1", {0: 0.0, 1: 0.0, 2: 0.0})
+        app2 = Application("App 2", {0: 0.0, 1: 0.0, 2: 0.0})
+
+        calc = SimilarityCalculator()
+        similarity = calc.proportional_similarity(app1, app2)
+
+        # Two apps with no features should NOT be similar
+        assert similarity == 0.0
+
+    def test_proportional_similarity_partial_overlap(self):
+        """Test proportional similarity with partial feature overlap."""
+        app1 = Application("App 1", {0: 5.0, 1: 3.0, 2: 4.0})
+        app2 = Application("App 2", {0: 5.0, 1: 3.0, 3: 2.0})
+
+        calc = SimilarityCalculator()
+        similarity = calc.proportional_similarity(app1, app2)
+
+        # Should have moderate similarity (share 2 out of 4 dimensions)
+        assert 0.4 < similarity < 0.9
 
     def test_jaccard_similarity(self):
         """Test Jaccard similarity."""
@@ -111,6 +133,17 @@ class TestSimilarityCalculator:
         # Intersection: {0, 1}, Union: {0, 1, 2}
         # Jaccard = 2/3
         assert similarity == pytest.approx(2/3, rel=0.01)
+
+    def test_jaccard_similarity_all_zeros(self):
+        """Test that Jaccard with all zeros is NOT similar."""
+        app1 = Application("App 1", {0: 0.0, 1: 0.0})
+        app2 = Application("App 2", {0: 0.0, 1: 0.0})
+
+        calc = SimilarityCalculator()
+        similarity = calc.jaccard_similarity(app1, app2)
+
+        # Two apps with no features should NOT be similar
+        assert similarity == 0.0
 
 
 class TestClusteringEngine:

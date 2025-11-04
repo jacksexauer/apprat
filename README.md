@@ -11,8 +11,16 @@ Cluster applications by similarity and rank them using proportional similarity a
 - **CSV-based data input**: Load application scores and dimension mappings from CSV files
 - **Proportional similarity**: Advanced algorithm that correctly weighs similarity - two simple apps with 5/5 matching features rank higher than complex apps with 50/100 matches
 - **Multiple similarity methods**: Choose from proportional, Jaccard, or cosine similarity
-- **Interactive clustering**: Perform hierarchical clustering with configurable cluster counts
-- **Desktop GUI**: User-friendly PyQt6 interface with multiple views
+- **Automatic clustering** 🎯: Dynamically determines optimal number of clusters - no guessing required!
+  - Silhouette-optimized (best quality)
+  - Threshold-based (natural groups)
+  - DBSCAN (finds outliers)
+- **Cluster feature analysis** 📊: Understand why apps are grouped together
+  - Identifies significant features per cluster
+  - Shows which capabilities connect applications
+  - Helps explain consolidation recommendations
+- **Manual clustering**: Optional manual control with configurable cluster counts
+- **Desktop GUI**: User-friendly PyQt6 interface with split-view cluster details
 - **Comprehensive analysis**: View similarity rankings, clusters, and detailed comparisons
 
 ## Installation
@@ -95,11 +103,37 @@ Index,Dimension
 
 ## Similarity Algorithm
 
-The proportional similarity algorithm ensures fair comparison:
+The proportional similarity algorithm ensures fair comparison with a bias towards applications WITH features:
 
-- **Simple apps with high overlap** score higher than **complex apps with lower proportional overlap**
-- Example: Apps with 5/5 matching dimensions (100%) > Apps with 50/100 matching dimensions (50%)
-- Normalizes by applicable features, not absolute feature counts
+### Key Features
+
+1. **Proportional Fairness**
+   - Simple apps with 5/5 matching dimensions (100%) > Complex apps with 50/100 matching dimensions (50%)
+   - Normalizes by applicable features, not absolute feature counts
+
+2. **Feature-Biased Scoring** 🎯
+   - **Apps with no features are NOT similar** (similarity = 0.0)
+   - Apps with no shared features get very low similarity (< 0.1)
+   - Only shared active features contribute to similarity
+   - Prevents false positives from undefined/empty applications
+
+3. **Shared Feature Emphasis**
+   - Focuses on dimensions where BOTH apps have non-zero scores
+   - Penalizes asymmetric dimensions (only one app has the feature)
+   - Rewards high overlap in active dimensions
+
+### Example Comparisons
+
+| Scenario | App 1 Features | App 2 Features | Similarity | Interpretation |
+|----------|----------------|----------------|------------|----------------|
+| Both empty | None (all 0s) | None (all 0s) | 0.00 | NOT similar (undefined) |
+| No overlap | {0,1,2} | {3,4,5} | ~0.01 | NOT similar (different) |
+| Partial overlap | {0,1,2,3} | {0,1,4,5} | ~0.67 | Similar (2/4 shared) |
+| High overlap | {0,1,2} (identical) | {0,1,2} (identical) | 1.00 | Very similar |
+| Simple 100% | 3/3 features match | 3/3 features match | 1.00 | Perfect match |
+| Complex 50% | 3/6 features match | 3/6 features match | ~0.67 | Partial match |
+
+**Business Value**: The algorithm only suggests consolidation when applications truly share features, avoiding false recommendations from undefined or completely different applications.
 
 ## Project Structure
 

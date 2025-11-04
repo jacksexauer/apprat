@@ -28,11 +28,15 @@ class SimilarityCalculator:
         This metric ensures that two simple apps with high overlap score higher
         than two complex apps with lower proportional overlap.
 
+        IMPORTANT: Similarity is biased towards applications WITH features.
+        Two applications with all zeros are NOT similar (returns 0.0).
+
         Algorithm:
-        1. Find dimensions where at least one app has a score > 0 (union)
-        2. For each dimension, calculate similarity of scores (normalized)
-        3. Weight by the minimum of the two scores (emphasizes shared features)
-        4. Normalize by the count of applicable dimensions
+        1. Identify shared active dimensions (both apps have score > 0)
+        2. Identify asymmetric dimensions (only one app has score > 0)
+        3. Calculate similarity weighted heavily by shared active features
+        4. Penalize for asymmetric dimensions (mismatched features)
+        5. Return 0 if no shared active dimensions exist
 
         Args:
             app1: First application
@@ -41,40 +45,61 @@ class SimilarityCalculator:
         Returns:
             Similarity score between 0 and 1 (1 = identical)
         """
-        # Get all dimensions where at least one app has a non-zero score
-        all_dims = set(app1.scores.keys()) | set(app2.scores.keys())
+        # Get active dimensions for each app
+        active1 = set(app1.active_dimensions)
+        active2 = set(app2.active_dimensions)
 
-        if not all_dims:
+        # If both apps have no features, they are NOT similar
+        if not active1 and not active2:
             return 0.0
 
-        # Calculate weighted similarity across dimensions
-        total_similarity = 0.0
-        total_weight = 0.0
+        # Find shared and asymmetric dimensions
+        shared_dims = active1 & active2  # Both have non-zero scores
+        asymmetric_dims = (active1 | active2) - shared_dims  # Only one has non-zero
 
-        for dim in all_dims:
+        # If no shared active dimensions, similarity is very low
+        if not shared_dims:
+            # Return a very small similarity based on how different they are
+            # More asymmetric dimensions = less similar
+            total_dims = len(active1 | active2)
+            return 0.1 / (1 + total_dims)  # Approaches 0 as difference grows
+
+        # Calculate similarity for shared active dimensions
+        shared_similarity = 0.0
+        shared_weight = 0.0
+
+        for dim in shared_dims:
             score1 = app1.get_score(dim)
             score2 = app2.get_score(dim)
 
-            # Skip if both are zero (shouldn't happen given our union)
-            if score1 == 0 and score2 == 0:
-                continue
-
-            # Calculate similarity for this dimension (1 - normalized difference)
+            # Calculate how similar the scores are (1 = identical, 0 = max difference)
             max_score = max(score1, score2)
-            if max_score > 0:
-                dim_similarity = 1 - abs(score1 - score2) / max_score
-            else:
-                dim_similarity = 0.0
+            dim_similarity = 1 - abs(score1 - score2) / max_score
 
-            # Weight by minimum score (emphasizes shared active features)
-            weight = min(score1, score2) + 0.1  # Add small constant to avoid zero weight
-            total_similarity += dim_similarity * weight
-            total_weight += weight
+            # Weight by the magnitude of shared investment in this dimension
+            # Use min to emphasize that both must have significant scores
+            weight = min(score1, score2)
+            shared_similarity += dim_similarity * weight
+            shared_weight += weight
 
-        if total_weight == 0:
-            return 0.0
+        # Calculate base similarity from shared dimensions
+        if shared_weight > 0:
+            base_similarity = shared_similarity / shared_weight
+        else:
+            base_similarity = 0.0
 
-        return total_similarity / total_weight
+        # Apply penalty for asymmetric dimensions
+        # The more dimensions they DON'T share, the less similar they are
+        total_active_dims = len(active1 | active2)
+        shared_ratio = len(shared_dims) / total_active_dims if total_active_dims > 0 else 0
+
+        # Final similarity combines:
+        # 1. How similar the shared dimensions are (base_similarity)
+        # 2. What proportion of their dimensions are shared (shared_ratio)
+        # This ensures apps must have both high score similarity AND high dimension overlap
+        final_similarity = base_similarity * (0.5 + 0.5 * shared_ratio)
+
+        return final_similarity
 
     @staticmethod
     def jaccard_similarity(app1: Application, app2: Application) -> float:
@@ -86,6 +111,8 @@ class SimilarityCalculator:
         This is purely based on which dimensions are active (non-zero),
         not the magnitude of scores.
 
+        IMPORTANT: Two applications with no features are NOT similar (returns 0.0).
+
         Args:
             app1: First application
             app2: Second application
@@ -96,8 +123,9 @@ class SimilarityCalculator:
         dims1 = set(app1.active_dimensions)
         dims2 = set(app2.active_dimensions)
 
+        # If both apps have no features, they are NOT similar
         if not dims1 and not dims2:
-            return 1.0  # Both empty = identical
+            return 0.0
 
         intersection = len(dims1 & dims2)
         union = len(dims1 | dims2)
@@ -136,52 +164,98 @@ class SimilarityCalculator:
 
         Returns both the overall similarity and a dictionary with per-dimension details.
 
+        IMPORTANT: Similarity is biased towards applications WITH features.
+        Two applications with all zeros are NOT similar (returns 0.0).
+
         Args:
             app1: First application
             app2: Second application
 
         Returns:
             Tuple of (overall_similarity, dimension_details)
-            where dimension_details is a dict with keys:
+            where dimension_details is a list of dicts with keys:
                 - 'dimension': dimension index
                 - 'score1': score for app1
                 - 'score2': score for app2
                 - 'similarity': similarity for this dimension
                 - 'weight': weight applied
+                - 'shared': boolean indicating if both apps have this feature
         """
-        all_dims = set(app1.scores.keys()) | set(app2.scores.keys())
+        # Get active dimensions for each app
+        active1 = set(app1.active_dimensions)
+        active2 = set(app2.active_dimensions)
 
-        if not all_dims:
-            return 0.0, {}
+        # If both apps have no features, they are NOT similar
+        if not active1 and not active2:
+            return 0.0, []
 
-        dimension_details = []
-        total_similarity = 0.0
-        total_weight = 0.0
+        # Find shared and all relevant dimensions
+        shared_dims = active1 & active2
+        all_relevant_dims = active1 | active2
 
-        for dim in sorted(all_dims):
-            score1 = app1.get_score(dim)
-            score2 = app2.get_score(dim)
+        # If no shared active dimensions, similarity is very low
+        if not shared_dims:
+            total_dims = len(all_relevant_dims)
+            similarity = 0.1 / (1 + total_dims)
 
-            if score1 == 0 and score2 == 0:
-                continue
-
-            max_score = max(score1, score2)
-            dim_similarity = 1 - abs(score1 - score2) / max_score if max_score > 0 else 0.0
-
-            weight = min(score1, score2) + 0.1
-            total_similarity += dim_similarity * weight
-            total_weight += weight
-
-            dimension_details.append(
-                {
+            # Still provide dimension details
+            dimension_details = []
+            for dim in sorted(all_relevant_dims):
+                score1 = app1.get_score(dim)
+                score2 = app2.get_score(dim)
+                dimension_details.append({
                     "dimension": dim,
                     "score1": score1,
                     "score2": score2,
-                    "similarity": dim_similarity,
-                    "weight": weight,
-                }
-            )
+                    "similarity": 0.0,
+                    "weight": 0.0,
+                    "shared": False,
+                })
+            return similarity, dimension_details
 
-        overall_similarity = total_similarity / total_weight if total_weight > 0 else 0.0
+        # Calculate similarity for shared dimensions
+        dimension_details = []
+        shared_similarity = 0.0
+        shared_weight = 0.0
+
+        # Process all relevant dimensions
+        for dim in sorted(all_relevant_dims):
+            score1 = app1.get_score(dim)
+            score2 = app2.get_score(dim)
+            is_shared = dim in shared_dims
+
+            if is_shared:
+                # Both apps have this dimension
+                max_score = max(score1, score2)
+                dim_similarity = 1 - abs(score1 - score2) / max_score
+                weight = min(score1, score2)
+                shared_similarity += dim_similarity * weight
+                shared_weight += weight
+            else:
+                # Only one app has this dimension (asymmetric)
+                dim_similarity = 0.0
+                weight = 0.0
+
+            dimension_details.append({
+                "dimension": dim,
+                "score1": score1,
+                "score2": score2,
+                "similarity": dim_similarity,
+                "weight": weight,
+                "shared": is_shared,
+            })
+
+        # Calculate base similarity from shared dimensions
+        if shared_weight > 0:
+            base_similarity = shared_similarity / shared_weight
+        else:
+            base_similarity = 0.0
+
+        # Apply penalty for asymmetric dimensions
+        total_active_dims = len(all_relevant_dims)
+        shared_ratio = len(shared_dims) / total_active_dims if total_active_dims > 0 else 0
+
+        # Final similarity
+        overall_similarity = base_similarity * (0.5 + 0.5 * shared_ratio)
 
         return overall_similarity, dimension_details

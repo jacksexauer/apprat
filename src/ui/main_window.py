@@ -16,9 +16,14 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QMessageBox,
     QHeaderView,
+    QListWidget,
+    QListWidgetItem,
+    QSplitter,
+    QTextEdit,
+    QGroupBox,
 )
 from PyQt6.QtCore import Qt
-from typing import Optional
+from typing import Optional, Dict
 
 # Support both relative and absolute imports
 try:
@@ -77,13 +82,53 @@ class MainWindow(QMainWindow):
         self.similarity_layout.addWidget(self.similarity_table)
         self.tabs.addTab(self.similarity_tab, "Similarity Rankings")
 
-        # Tab 3: Clusters
+        # Tab 3: Clusters (with split view)
         self.cluster_tab = QWidget()
         self.cluster_layout = QVBoxLayout(self.cluster_tab)
         self.cluster_layout.addLayout(self.create_cluster_controls())
-        self.cluster_table = QTableWidget()
-        self.cluster_layout.addWidget(self.cluster_table)
+
+        # Create splitter for cluster list and details
+        cluster_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left side: Cluster list
+        self.cluster_list = QListWidget()
+        self.cluster_list.currentItemChanged.connect(self.on_cluster_selected)
+        cluster_splitter.addWidget(self.cluster_list)
+
+        # Right side: Cluster details
+        detail_widget = QWidget()
+        detail_layout = QVBoxLayout(detail_widget)
+
+        # Applications in cluster
+        apps_group = QGroupBox("Applications in Cluster")
+        apps_layout = QVBoxLayout(apps_group)
+        self.cluster_apps_list = QListWidget()
+        apps_layout.addWidget(self.cluster_apps_list)
+        detail_layout.addWidget(apps_group)
+
+        # Significant features
+        features_group = QGroupBox("Significant Features")
+        features_layout = QVBoxLayout(features_group)
+        self.cluster_features_table = QTableWidget()
+        self.cluster_features_table.setColumnCount(4)
+        self.cluster_features_table.setHorizontalHeaderLabels([
+            "Feature", "Avg Score", "Apps with Feature", "Significance"
+        ])
+        self.cluster_features_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        features_layout.addWidget(self.cluster_features_table)
+        detail_layout.addWidget(features_group)
+
+        cluster_splitter.addWidget(detail_widget)
+        cluster_splitter.setStretchFactor(0, 1)  # Cluster list takes 1 part
+        cluster_splitter.setStretchFactor(1, 2)  # Details takes 2 parts
+
+        self.cluster_layout.addWidget(cluster_splitter)
         self.tabs.addTab(self.cluster_tab, "Clusters")
+
+        # Store cluster data for later use
+        self.current_clusters: Optional[Dict[str, int]] = None
 
         # Status bar
         self.statusBar().showMessage("Ready. Please load application data.")
@@ -143,24 +188,58 @@ class MainWindow(QMainWindow):
         """Create controls for clustering analysis."""
         layout = QHBoxLayout()
 
-        layout.addWidget(QLabel("Number of Clusters:"))
+        # Clustering mode
+        layout.addWidget(QLabel("Mode:"))
+        self.cluster_mode = QComboBox()
+        self.cluster_mode.addItems(["Automatic", "Manual"])
+        self.cluster_mode.currentTextChanged.connect(self.on_cluster_mode_changed)
+        layout.addWidget(self.cluster_mode)
+
+        # Number of clusters (for manual mode)
+        self.n_clusters_label = QLabel("Clusters:")
+        layout.addWidget(self.n_clusters_label)
         self.n_clusters_spinner = QSpinBox()
         self.n_clusters_spinner.setRange(2, 20)
         self.n_clusters_spinner.setValue(3)
         layout.addWidget(self.n_clusters_spinner)
 
-        layout.addWidget(QLabel("Method:"))
+        # Auto-cluster method
+        self.auto_method_label = QLabel("Auto Method:")
+        layout.addWidget(self.auto_method_label)
+        self.auto_cluster_method = QComboBox()
+        self.auto_cluster_method.addItems([
+            "Silhouette (Best Quality)",
+            "Threshold (Natural Groups)",
+            "DBSCAN (Density-Based)"
+        ])
+        layout.addWidget(self.auto_cluster_method)
+
+        # Similarity method
+        layout.addWidget(QLabel("Similarity:"))
         self.cluster_method = QComboBox()
         self.cluster_method.addItems(["proportional", "jaccard", "cosine"])
         layout.addWidget(self.cluster_method)
 
+        # Calculate button
         self.calculate_clusters_btn = QPushButton("Calculate Clusters")
         self.calculate_clusters_btn.clicked.connect(self.calculate_clusters)
         self.calculate_clusters_btn.setEnabled(False)
         layout.addWidget(self.calculate_clusters_btn)
 
         layout.addStretch()
+
+        # Initially set to automatic mode
+        self.on_cluster_mode_changed("Automatic")
+
         return layout
+
+    def on_cluster_mode_changed(self, mode: str):
+        """Handle cluster mode change."""
+        is_manual = mode == "Manual"
+        self.n_clusters_label.setVisible(is_manual)
+        self.n_clusters_spinner.setVisible(is_manual)
+        self.auto_method_label.setVisible(not is_manual)
+        self.auto_cluster_method.setVisible(not is_manual)
 
     def load_matrix_file(self):
         """Open file dialog to select application matrix CSV."""
@@ -282,9 +361,41 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Calculating clusters...")
 
             method = self.cluster_method.currentText()
-            n_clusters = self.n_clusters_spinner.value()
+            mode = self.cluster_mode.currentText()
 
-            clusters = self.clustering_engine.hierarchical_clustering(n_clusters, method)
+            # Determine which clustering method to use
+            if mode == "Automatic":
+                auto_method = self.auto_cluster_method.currentText()
+
+                if "Silhouette" in auto_method:
+                    clusters, metadata = self.clustering_engine.auto_cluster(method=method)
+                    status_msg = (
+                        f"Automatically found {metadata['n_clusters']} clusters "
+                        f"(silhouette score: {metadata['silhouette_score']:.3f})"
+                    )
+                elif "Threshold" in auto_method:
+                    clusters, metadata = self.clustering_engine.auto_cluster_threshold(method=method)
+                    status_msg = (
+                        f"Automatically found {metadata['n_clusters']} clusters "
+                        f"(threshold: {metadata['threshold_used']:.3f})"
+                    )
+                elif "DBSCAN" in auto_method:
+                    clusters, metadata = self.clustering_engine.dbscan_clustering(method=method)
+                    status_msg = (
+                        f"Found {metadata['n_clusters']} clusters with "
+                        f"{metadata['n_noise']} outliers (DBSCAN)"
+                    )
+                else:
+                    clusters, metadata = self.clustering_engine.auto_cluster(method=method)
+                    status_msg = f"Automatically found {metadata['n_clusters']} clusters"
+            else:
+                # Manual mode
+                n_clusters = self.n_clusters_spinner.value()
+                clusters = self.clustering_engine.hierarchical_clustering(n_clusters, method)
+                status_msg = f"Created {n_clusters} clusters using {method} method"
+
+            # Store clusters for later use
+            self.current_clusters = clusters
 
             # Group by cluster
             cluster_groups = {}
@@ -293,27 +404,90 @@ class MainWindow(QMainWindow):
                     cluster_groups[cluster_id] = []
                 cluster_groups[cluster_id].append(app_name)
 
-            # Display in table
-            total_rows = sum(len(apps) for apps in cluster_groups.values())
-            self.cluster_table.setRowCount(total_rows)
-            self.cluster_table.setColumnCount(2)
-            self.cluster_table.setHorizontalHeaderLabels(["Cluster", "Application"])
-
-            row = 0
+            # Populate cluster list
+            self.cluster_list.clear()
             for cluster_id in sorted(cluster_groups.keys()):
-                apps = sorted(cluster_groups[cluster_id])
-                for app_name in apps:
-                    self.cluster_table.setItem(row, 0, QTableWidgetItem(f"Cluster {cluster_id}"))
-                    self.cluster_table.setItem(row, 1, QTableWidgetItem(app_name))
-                    row += 1
+                cluster_label = f"Cluster {cluster_id}" if cluster_id >= 0 else "Outliers"
+                apps_count = len(cluster_groups[cluster_id])
 
-            self.cluster_table.horizontalHeader().setSectionResizeMode(
-                QHeaderView.ResizeMode.ResizeToContents
-            )
+                # Analyze cluster features
+                analysis = self.clustering_engine.analyze_cluster_features(clusters, cluster_id)
+                top_features = analysis['significant_features'][:2]
+                feature_names = [f['dimension_name'] for f in top_features]
+                features_preview = ', '.join(feature_names) if feature_names else 'No features'
 
-            self.statusBar().showMessage(
-                f"Calculated {len(cluster_groups)} clusters using {method} method"
-            )
+                # Create list item with cluster info
+                item_text = f"{cluster_label} ({apps_count} apps) - {features_preview}"
+                item = QListWidgetItem(item_text)
+                item.setData(Qt.ItemDataRole.UserRole, cluster_id)  # Store cluster_id
+                self.cluster_list.addItem(item)
+
+            # Select first cluster by default
+            if self.cluster_list.count() > 0:
+                self.cluster_list.setCurrentRow(0)
+
+            self.statusBar().showMessage(status_msg)
+
+            # Show detailed information for automatic clustering
+            if mode == "Automatic":
+                info_msg = f"Clustering Results:\n\n{status_msg}\n\n"
+                info_msg += f"Cluster Distribution:\n"
+                for cluster_id in sorted(cluster_groups.keys()):
+                    cluster_label = f"Cluster {cluster_id}" if cluster_id >= 0 else "Outliers"
+                    info_msg += f"  {cluster_label}: {len(cluster_groups[cluster_id])} applications\n"
+
+                QMessageBox.information(self, "Automatic Clustering Complete", info_msg)
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to calculate clusters:\n{str(e)}")
+
+    def on_cluster_selected(self, current, previous):
+        """Handle cluster selection to show details."""
+        if not current or not self.current_clusters or not self.clustering_engine:
+            return
+
+        try:
+            # Get cluster ID from item data
+            cluster_id = current.data(Qt.ItemDataRole.UserRole)
+
+            # Analyze cluster features
+            analysis = self.clustering_engine.analyze_cluster_features(
+                self.current_clusters, cluster_id
+            )
+
+            # Populate applications list
+            self.cluster_apps_list.clear()
+            for app_name in sorted(analysis['applications']):
+                self.cluster_apps_list.addItem(app_name)
+
+            # Populate features table
+            features = analysis['significant_features']
+            self.cluster_features_table.setRowCount(len(features))
+
+            for row, feature in enumerate(features):
+                # Feature name
+                self.cluster_features_table.setItem(
+                    row, 0, QTableWidgetItem(feature['dimension_name'])
+                )
+
+                # Average score
+                self.cluster_features_table.setItem(
+                    row, 1, QTableWidgetItem(f"{feature['avg_score']:.2f}")
+                )
+
+                # Apps with feature
+                apps_with = f"{feature['active_count']}/{analysis['size']}"
+                percentage = f"({feature['active_ratio']*100:.0f}%)"
+                self.cluster_features_table.setItem(
+                    row, 2, QTableWidgetItem(f"{apps_with} {percentage}")
+                )
+
+                # Significance
+                self.cluster_features_table.setItem(
+                    row, 3, QTableWidgetItem(f"{feature['significance']:.2f}")
+                )
+
+            self.cluster_features_table.resizeColumnsToContents()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to display cluster details:\n{str(e)}")

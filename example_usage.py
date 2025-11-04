@@ -89,9 +89,17 @@ def main():
     print(details_df.to_string(index=False))
     print()
 
-    # Clustering
-    print("Performing hierarchical clustering (3 clusters)...")
-    clusters = engine.hierarchical_clustering(n_clusters=3, method="proportional")
+    # Automatic Clustering
+    print("Performing AUTOMATIC clustering...")
+    print("(No need to specify number of clusters!)")
+    clusters, metadata = engine.auto_cluster(method="proportional")
+
+    print()
+    print("Automatic Clustering Results:")
+    print("-" * 60)
+    print(f"Method: {metadata['method_used']}")
+    print(f"Clusters found: {metadata['n_clusters']}")
+    print(f"Quality score: {metadata['silhouette_score']:.4f}")
 
     print()
     print("Cluster Assignments:")
