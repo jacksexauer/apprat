@@ -128,10 +128,32 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.cluster_tab, "Clusters")
 
         # Store cluster data for later use
-        self.current_clusters: Optional[Dict[str, int]] = None
+        self.current_clusters: Optional[Dict[str, str]] = None
+        self.cluster_history: list = []  # Stack for undo functionality
 
         # Status bar
         self.statusBar().showMessage("Ready. Please load application data.")
+
+    def _natural_sort_key(self, cluster_id: str):
+        """
+        Generate a sort key for natural sorting of cluster IDs.
+
+        Handles hierarchical cluster names like "0", "0.1", "0.2", "1", "1.1", "1.2".
+
+        Args:
+            cluster_id: Cluster ID string to generate sort key for
+
+        Returns:
+            Tuple that can be used for sorting
+        """
+        parts = str(cluster_id).split('.')
+        key = []
+        for part in parts:
+            try:
+                key.append(int(part))
+            except ValueError:
+                key.append(part)
+        return tuple(key)
 
     def create_file_loading_section(self) -> QHBoxLayout:
         """Create the file loading section."""
@@ -225,6 +247,23 @@ class MainWindow(QMainWindow):
         self.calculate_clusters_btn.clicked.connect(self.calculate_clusters)
         self.calculate_clusters_btn.setEnabled(False)
         layout.addWidget(self.calculate_clusters_btn)
+
+        # Add separator
+        layout.addWidget(QLabel(" | "))
+
+        # Split cluster button
+        self.split_cluster_btn = QPushButton("Split Cluster")
+        self.split_cluster_btn.clicked.connect(self.split_selected_cluster)
+        self.split_cluster_btn.setEnabled(False)
+        self.split_cluster_btn.setToolTip("Split the selected cluster into two sub-clusters")
+        layout.addWidget(self.split_cluster_btn)
+
+        # Undo button
+        self.undo_split_btn = QPushButton("Undo Split")
+        self.undo_split_btn.clicked.connect(self.undo_cluster_split)
+        self.undo_split_btn.setEnabled(False)
+        self.undo_split_btn.setToolTip("Undo the last cluster split")
+        layout.addWidget(self.undo_split_btn)
 
         layout.addStretch()
 
@@ -394,8 +433,9 @@ class MainWindow(QMainWindow):
                 clusters = self.clustering_engine.hierarchical_clustering(n_clusters, method)
                 status_msg = f"Created {n_clusters} clusters using {method} method"
 
-            # Store clusters for later use
+            # Store clusters for later use and in history
             self.current_clusters = clusters
+            self.cluster_history = [clusters.copy()]  # Reset history with new clustering
 
             # Group by cluster
             cluster_groups = {}
@@ -404,10 +444,11 @@ class MainWindow(QMainWindow):
                     cluster_groups[cluster_id] = []
                 cluster_groups[cluster_id].append(app_name)
 
-            # Populate cluster list
+            # Populate cluster list (use natural sorting for hierarchical IDs)
             self.cluster_list.clear()
-            for cluster_id in sorted(cluster_groups.keys()):
-                cluster_label = f"Cluster {cluster_id}" if cluster_id >= 0 else "Outliers"
+            for cluster_id in sorted(cluster_groups.keys(), key=self._natural_sort_key):
+                # Handle string cluster IDs (including hierarchical ones like "0.1")
+                cluster_label = f"Cluster {cluster_id}" if str(cluster_id) != "-1" else "Outliers"
                 apps_count = len(cluster_groups[cluster_id])
 
                 # Analyze cluster features
@@ -426,14 +467,18 @@ class MainWindow(QMainWindow):
             if self.cluster_list.count() > 0:
                 self.cluster_list.setCurrentRow(0)
 
+            # Enable split button now that we have clusters
+            self.split_cluster_btn.setEnabled(True)
+            self.undo_split_btn.setEnabled(False)  # No history yet
+
             self.statusBar().showMessage(status_msg)
 
             # Show detailed information for automatic clustering
             if mode == "Automatic":
                 info_msg = f"Clustering Results:\n\n{status_msg}\n\n"
                 info_msg += f"Cluster Distribution:\n"
-                for cluster_id in sorted(cluster_groups.keys()):
-                    cluster_label = f"Cluster {cluster_id}" if cluster_id >= 0 else "Outliers"
+                for cluster_id in sorted(cluster_groups.keys(), key=self._natural_sort_key):
+                    cluster_label = f"Cluster {cluster_id}" if str(cluster_id) != "-1" else "Outliers"
                     info_msg += f"  {cluster_label}: {len(cluster_groups[cluster_id])} applications\n"
 
                 QMessageBox.information(self, "Automatic Clustering Complete", info_msg)
@@ -491,3 +536,153 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to display cluster details:\n{str(e)}")
+
+    def split_selected_cluster(self):
+        """Split the currently selected cluster into two sub-clusters."""
+        if not self.current_clusters or not self.clustering_engine:
+            return
+
+        # Get selected cluster
+        current_item = self.cluster_list.currentItem()
+        if not current_item:
+            QMessageBox.warning(self, "No Selection", "Please select a cluster to split.")
+            return
+
+        cluster_id = current_item.data(Qt.ItemDataRole.UserRole)
+
+        # Check if cluster has enough apps
+        cluster_apps = [name for name, cid in self.current_clusters.items() if cid == cluster_id]
+        if len(cluster_apps) < 2:
+            QMessageBox.warning(
+                self, "Cannot Split",
+                f"Cluster has only {len(cluster_apps)} application(s). Need at least 2 to split."
+            )
+            return
+
+        try:
+            self.statusBar().showMessage("Splitting cluster...")
+
+            # Save current state to history before splitting
+            self.cluster_history.append(self.current_clusters.copy())
+
+            # Perform the split
+            method = self.cluster_method.currentText()
+            new_clusters, metadata = self.clustering_engine.split_cluster(
+                self.current_clusters, cluster_id, method
+            )
+
+            # Update current clusters
+            self.current_clusters = new_clusters
+
+            # Refresh the display
+            self.refresh_cluster_display()
+
+            # Enable undo button
+            self.undo_split_btn.setEnabled(True)
+
+            # Show info about the split
+            info_msg = f"Cluster Split Complete\n\n"
+            info_msg += f"Original: Cluster {metadata['original_cluster']} ({len(cluster_apps)} apps)\n\n"
+            info_msg += f"Split into:\n"
+            info_msg += f"  • Cluster {metadata['new_cluster_1']} ({metadata['size_1']} apps)\n"
+            info_msg += f"  • Cluster {metadata['new_cluster_2']} ({metadata['size_2']} apps)\n\n"
+
+            # Show which apps went where
+            if 'group_1' in metadata and 'group_2' in metadata:
+                info_msg += f"\nCluster {metadata['new_cluster_1']}:\n"
+                for app in sorted(metadata['group_1']):
+                    info_msg += f"  - {app}\n"
+
+                info_msg += f"\nCluster {metadata['new_cluster_2']}:\n"
+                for app in sorted(metadata['group_2']):
+                    info_msg += f"  - {app}\n"
+
+            QMessageBox.information(self, "Cluster Split", info_msg)
+
+            self.statusBar().showMessage(
+                f"Split cluster {cluster_id} into {metadata['new_cluster_1']} "
+                f"and {metadata['new_cluster_2']}"
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to split cluster:\n{str(e)}")
+
+    def undo_cluster_split(self):
+        """Undo the last cluster split."""
+        if len(self.cluster_history) < 2:
+            QMessageBox.warning(self, "Nothing to Undo", "No cluster splits to undo.")
+            return
+
+        try:
+            # Remove current state and restore previous
+            self.cluster_history.pop()  # Remove current
+            self.current_clusters = self.cluster_history[-1].copy()
+
+            # Refresh the display
+            self.refresh_cluster_display()
+
+            # Disable undo if no more history
+            if len(self.cluster_history) <= 1:
+                self.undo_split_btn.setEnabled(False)
+
+            self.statusBar().showMessage("Cluster split undone")
+
+            QMessageBox.information(
+                self, "Undo Complete",
+                "The last cluster split has been undone."
+            )
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to undo split:\n{str(e)}")
+
+    def refresh_cluster_display(self):
+        """Refresh the cluster list display with current clusters."""
+        if not self.current_clusters or not self.clustering_engine:
+            return
+
+        # Group by cluster
+        cluster_groups = {}
+        for app_name, cluster_id in self.current_clusters.items():
+            if cluster_id not in cluster_groups:
+                cluster_groups[cluster_id] = []
+            cluster_groups[cluster_id].append(app_name)
+
+        # Remember current selection
+        current_item = self.cluster_list.currentItem()
+        selected_cluster_id = None
+        if current_item:
+            selected_cluster_id = current_item.data(Qt.ItemDataRole.UserRole)
+
+        # Populate cluster list (use natural sorting for hierarchical IDs)
+        self.cluster_list.clear()
+        for cluster_id in sorted(cluster_groups.keys(), key=self._natural_sort_key):
+            # Handle string cluster IDs (including hierarchical ones like "0.1")
+            cluster_label = f"Cluster {cluster_id}" if str(cluster_id) != "-1" else "Outliers"
+            apps_count = len(cluster_groups[cluster_id])
+
+            # Analyze cluster features
+            analysis = self.clustering_engine.analyze_cluster_features(
+                self.current_clusters, cluster_id
+            )
+            top_features = analysis['significant_features'][:2]
+            feature_names = [f['dimension_name'] for f in top_features]
+            features_preview = ', '.join(feature_names) if feature_names else 'No features'
+
+            # Create list item with cluster info
+            item_text = f"{cluster_label} ({apps_count} apps) - {features_preview}"
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.ItemDataRole.UserRole, cluster_id)
+            self.cluster_list.addItem(item)
+
+        # Try to restore selection or select first
+        selection_found = False
+        if selected_cluster_id is not None:
+            for i in range(self.cluster_list.count()):
+                item = self.cluster_list.item(i)
+                if item.data(Qt.ItemDataRole.UserRole) == selected_cluster_id:
+                    self.cluster_list.setCurrentRow(i)
+                    selection_found = True
+                    break
+
+        if not selection_found and self.cluster_list.count() > 0:
+            self.cluster_list.setCurrentRow(0)

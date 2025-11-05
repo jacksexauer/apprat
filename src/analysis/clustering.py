@@ -1,7 +1,7 @@
 """
 Clustering engine for identifying similar applications.
 """
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Union
 import numpy as np
 import pandas as pd
 from sklearn.cluster import AgglomerativeClustering, DBSCAN
@@ -146,7 +146,7 @@ class ClusteringEngine:
 
     def hierarchical_clustering(
         self, n_clusters: int = None, method: str = "proportional"
-    ) -> Dict[str, int]:
+    ) -> Dict[str, str]:
         """
         Perform hierarchical clustering on applications.
 
@@ -155,7 +155,7 @@ class ClusteringEngine:
             method: Similarity method to use
 
         Returns:
-            Dictionary mapping application names to cluster labels
+            Dictionary mapping application names to cluster labels (as strings)
         """
         if self._similarity_matrix is None:
             self.calculate_similarity_matrix(method)
@@ -178,9 +178,9 @@ class ClusteringEngine:
 
         labels = clusterer.fit_predict(distance_matrix)
 
-        # Map application names to cluster labels
+        # Map application names to cluster labels (as strings)
         app_names = self.feature_matrix.get_application_names()
-        return {app_names[i]: int(labels[i]) for i in range(len(app_names))}
+        return {app_names[i]: str(labels[i]) for i in range(len(app_names))}
 
     def get_similarity_dataframe(self, method: str = "proportional") -> pd.DataFrame:
         """
@@ -251,7 +251,7 @@ class ClusteringEngine:
 
     def auto_cluster(
         self, method: str = "proportional", min_clusters: int = 2, max_clusters: int = None
-    ) -> Tuple[Dict[str, int], Dict[str, any]]:
+    ) -> Tuple[Dict[str, str], Dict[str, any]]:
         """
         Automatically determine optimal number of clusters and perform clustering.
 
@@ -265,7 +265,7 @@ class ClusteringEngine:
 
         Returns:
             Tuple of (cluster_assignments, metadata)
-            - cluster_assignments: Dict mapping app names to cluster labels
+            - cluster_assignments: Dict mapping app names to cluster labels (as strings)
             - metadata: Dict with keys:
                 - 'n_clusters': Optimal number of clusters found
                 - 'silhouette_score': Quality metric (higher is better)
@@ -288,7 +288,7 @@ class ClusteringEngine:
             # Too few apps to cluster
             app_names = self.feature_matrix.get_application_names()
             return (
-                {name: 0 for name in app_names},
+                {name: "0" for name in app_names},
                 {
                     'n_clusters': 1,
                     'silhouette_score': 0.0,
@@ -335,9 +335,9 @@ class ClusteringEngine:
         )
         labels = clusterer.fit_predict(distance_matrix)
 
-        # Map to application names
+        # Map to application names (as strings)
         app_names = self.feature_matrix.get_application_names()
-        cluster_assignments = {app_names[i]: int(labels[i]) for i in range(len(app_names))}
+        cluster_assignments = {app_names[i]: str(labels[i]) for i in range(len(app_names))}
 
         metadata = {
             'n_clusters': best_k,
@@ -350,7 +350,7 @@ class ClusteringEngine:
 
     def auto_cluster_threshold(
         self, method: str = "proportional", similarity_threshold: float = None
-    ) -> Tuple[Dict[str, int], Dict[str, any]]:
+    ) -> Tuple[Dict[str, str], Dict[str, any]]:
         """
         Automatically cluster based on similarity threshold.
 
@@ -363,7 +363,7 @@ class ClusteringEngine:
 
         Returns:
             Tuple of (cluster_assignments, metadata)
-            - cluster_assignments: Dict mapping app names to cluster labels
+            - cluster_assignments: Dict mapping app names to cluster labels (as strings)
             - metadata: Dict with keys:
                 - 'n_clusters': Number of clusters formed
                 - 'threshold_used': Similarity threshold applied
@@ -390,9 +390,9 @@ class ClusteringEngine:
         distance_matrix = 1 - self._similarity_matrix
         labels = clusterer.fit_predict(distance_matrix)
 
-        # Map to application names
+        # Map to application names (as strings)
         app_names = self.feature_matrix.get_application_names()
-        cluster_assignments = {app_names[i]: int(labels[i]) for i in range(len(app_names))}
+        cluster_assignments = {app_names[i]: str(labels[i]) for i in range(len(app_names))}
 
         n_clusters = len(set(labels))
 
@@ -452,12 +452,12 @@ class ClusteringEngine:
 
     def dbscan_clustering(
         self, method: str = "proportional", eps: float = None, min_samples: int = 2
-    ) -> Tuple[Dict[str, int], Dict[str, any]]:
+    ) -> Tuple[Dict[str, str], Dict[str, any]]:
         """
         Perform DBSCAN clustering (density-based clustering).
 
         DBSCAN automatically finds clusters based on density and can identify outliers.
-        Applications that don't fit well into any cluster are marked as noise (-1).
+        Applications that don't fit well into any cluster are marked as noise ("-1").
 
         Args:
             method: Similarity method to use
@@ -466,7 +466,7 @@ class ClusteringEngine:
 
         Returns:
             Tuple of (cluster_assignments, metadata)
-            - cluster_assignments: Dict mapping app names to cluster labels (-1 = noise)
+            - cluster_assignments: Dict mapping app names to cluster labels (as strings, "-1" = noise)
             - metadata: Dict with keys:
                 - 'n_clusters': Number of clusters found (excluding noise)
                 - 'n_noise': Number of applications marked as noise
@@ -496,9 +496,9 @@ class ClusteringEngine:
         )
         labels = clusterer.fit_predict(distance_matrix)
 
-        # Map to application names
+        # Map to application names (as strings)
         app_names = self.feature_matrix.get_application_names()
-        cluster_assignments = {app_names[i]: int(labels[i]) for i in range(len(app_names))}
+        cluster_assignments = {app_names[i]: str(labels[i]) for i in range(len(app_names))}
 
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
         n_noise = np.sum(labels == -1)
@@ -583,7 +583,7 @@ class ClusteringEngine:
         return pd.DataFrame(results)
 
     def analyze_cluster_features(
-        self, cluster_assignments: Dict[str, int], cluster_id: int
+        self, cluster_assignments: Dict[str, Union[int, str]], cluster_id: Union[int, str]
     ) -> Dict[str, any]:
         """
         Analyze the most significant features for a specific cluster.
@@ -592,8 +592,8 @@ class ClusteringEngine:
         in this cluster - i.e., the features that define this group.
 
         Args:
-            cluster_assignments: Dict mapping app names to cluster IDs
-            cluster_id: The cluster to analyze
+            cluster_assignments: Dict mapping app names to cluster IDs (int or str)
+            cluster_id: The cluster to analyze (int or str)
 
         Returns:
             Dict with keys:
@@ -603,8 +603,9 @@ class ClusteringEngine:
                 - 'avg_scores': Average scores for each dimension
                 - 'active_count': Count of apps with non-zero score per dimension
         """
-        # Get applications in this cluster
-        app_names = [name for name, cid in cluster_assignments.items() if cid == cluster_id]
+        # Get applications in this cluster (handle both int and str cluster IDs)
+        cluster_id_str = str(cluster_id)
+        app_names = [name for name, cid in cluster_assignments.items() if str(cid) == cluster_id_str]
 
         if not app_names:
             return {
@@ -670,18 +671,19 @@ class ClusteringEngine:
         }
 
     def get_cluster_summary(
-        self, cluster_assignments: Dict[str, int]
+        self, cluster_assignments: Dict[str, Union[int, str]]
     ) -> pd.DataFrame:
         """
         Get a summary of all clusters with their characteristics.
 
         Args:
-            cluster_assignments: Dict mapping app names to cluster IDs
+            cluster_assignments: Dict mapping app names to cluster IDs (int or str)
 
         Returns:
             DataFrame with cluster summaries
         """
-        cluster_ids = sorted(set(cluster_assignments.values()))
+        # Sort cluster IDs naturally (handle hierarchical names like "0", "0.1", "0.2", "1")
+        cluster_ids = sorted(set(cluster_assignments.values()), key=lambda x: self._natural_sort_key(str(x)))
         summaries = []
 
         for cluster_id in cluster_ids:
@@ -692,7 +694,12 @@ class ClusteringEngine:
             feature_names = [f['dimension_name'] for f in top_features]
             feature_str = ', '.join(feature_names) if feature_names else 'No strong features'
 
-            cluster_label = f"Cluster {cluster_id}" if cluster_id >= 0 else "Outliers"
+            # Handle string cluster IDs (including hierarchical like "0.1")
+            try:
+                cluster_num = int(cluster_id) if isinstance(cluster_id, (int, float)) else int(float(cluster_id))
+                cluster_label = f"Cluster {cluster_id}" if cluster_num >= 0 else "Outliers"
+            except (ValueError, TypeError):
+                cluster_label = f"Cluster {cluster_id}"
 
             summaries.append({
                 'Cluster': cluster_label,
@@ -703,3 +710,158 @@ class ClusteringEngine:
             })
 
         return pd.DataFrame(summaries)
+
+    def _natural_sort_key(self, s: str):
+        """
+        Generate a sort key for natural sorting of cluster IDs.
+
+        Handles hierarchical cluster names like "0", "0.1", "0.2", "1", "1.1", "1.2".
+
+        Args:
+            s: String to generate sort key for
+
+        Returns:
+            Tuple that can be used for sorting
+        """
+        import re
+        # Split on dots to handle hierarchical naming
+        parts = s.split('.')
+        key = []
+        for part in parts:
+            # Try to convert to int, otherwise use the string
+            try:
+                key.append(int(part))
+            except ValueError:
+                key.append(part)
+        return tuple(key)
+
+    def split_cluster(
+        self, cluster_assignments: Dict[str, Union[int, str]], cluster_id: Union[int, str], method: str = "proportional"
+    ) -> Tuple[Dict[str, str], Dict[str, any]]:
+        """
+        Split a cluster into two sub-clusters with hierarchical naming.
+
+        Intelligently divides the applications in a cluster based on their
+        similarity distribution within the cluster. The split treats the original
+        cluster as the entire plane - similarities are calculated only among
+        applications in this cluster.
+
+        Creates sub-clusters named X.1 and X.2 where X is the original cluster ID.
+        For example, splitting Cluster 0 creates Clusters 0.1 and 0.2.
+
+        Args:
+            cluster_assignments: Current cluster assignments (int or str IDs)
+            cluster_id: The cluster to split (int or str)
+            method: Similarity method to use
+
+        Returns:
+            Tuple of (new_cluster_assignments, metadata)
+            - new_cluster_assignments: Updated assignments with string cluster IDs
+            - metadata: Dict with keys:
+                - 'original_cluster': Original cluster ID
+                - 'new_cluster_1': First new cluster ID (X.1)
+                - 'new_cluster_2': Second new cluster ID (X.2)
+                - 'size_1': Size of first new cluster
+                - 'size_2': Size of second new cluster
+                - 'method_used': How the split was performed
+        """
+        # Convert cluster_id to string for consistent handling
+        cluster_id_str = str(cluster_id)
+
+        # Get applications in the target cluster
+        cluster_apps = [name for name, cid in cluster_assignments.items() if str(cid) == cluster_id_str]
+
+        if len(cluster_apps) < 2:
+            raise ValueError(f"Cannot split cluster with {len(cluster_apps)} application(s). Need at least 2.")
+
+        # Generate new hierarchical cluster IDs
+        new_cluster_1 = f"{cluster_id_str}.1"
+        new_cluster_2 = f"{cluster_id_str}.2"
+
+        if len(cluster_apps) == 2:
+            # Simple case: split into individual apps
+            new_assignments = {name: str(cid) for name, cid in cluster_assignments.items()}
+
+            # Assign to new cluster IDs
+            new_assignments[cluster_apps[0]] = new_cluster_1
+            new_assignments[cluster_apps[1]] = new_cluster_2
+
+            metadata = {
+                'original_cluster': cluster_id_str,
+                'new_cluster_1': new_cluster_1,
+                'new_cluster_2': new_cluster_2,
+                'size_1': 1,
+                'size_2': 1,
+                'group_1': [cluster_apps[0]],
+                'group_2': [cluster_apps[1]],
+                'method_used': 'simple_split'
+            }
+
+            return new_assignments, metadata
+
+        # Calculate similarity matrix for apps in this cluster ONLY
+        # This treats the cluster as the entire plane for split analysis
+        n_apps = len(cluster_apps)
+        sub_similarity_matrix = np.zeros((n_apps, n_apps))
+
+        for i in range(n_apps):
+            for j in range(i, n_apps):
+                app1 = self.feature_matrix.get_application(cluster_apps[i])
+                app2 = self.feature_matrix.get_application(cluster_apps[j])
+
+                if i == j:
+                    sub_similarity_matrix[i, j] = 1.0
+                else:
+                    if method == "proportional":
+                        sim = self.similarity_calculator.proportional_similarity(app1, app2)
+                    elif method == "jaccard":
+                        sim = self.similarity_calculator.jaccard_similarity(app1, app2)
+                    elif method == "cosine":
+                        sim = self.similarity_calculator.cosine_similarity_score(
+                            app1, app2, self.feature_matrix.all_dimensions
+                        )
+                    else:
+                        sim = self.similarity_calculator.proportional_similarity(app1, app2)
+
+                    sub_similarity_matrix[i, j] = sim
+                    sub_similarity_matrix[j, i] = sim
+
+        # Convert to distance matrix
+        sub_distance_matrix = 1 - sub_similarity_matrix
+
+        # Perform hierarchical clustering with k=2 on this subset
+        # This finds the natural division within the cluster
+        clusterer = AgglomerativeClustering(
+            n_clusters=2,
+            metric="precomputed",
+            linkage="average"
+        )
+        sub_labels = clusterer.fit_predict(sub_distance_matrix)
+
+        # Create new cluster assignments (convert all to strings)
+        new_assignments = {name: str(cid) for name, cid in cluster_assignments.items()}
+
+        # Assign applications to new hierarchical clusters
+        group_1 = []
+        group_2 = []
+
+        for i, app_name in enumerate(cluster_apps):
+            if sub_labels[i] == 0:
+                new_assignments[app_name] = new_cluster_1
+                group_1.append(app_name)
+            else:
+                new_assignments[app_name] = new_cluster_2
+                group_2.append(app_name)
+
+        metadata = {
+            'original_cluster': cluster_id_str,
+            'new_cluster_1': new_cluster_1,
+            'new_cluster_2': new_cluster_2,
+            'size_1': len(group_1),
+            'size_2': len(group_2),
+            'group_1': group_1,
+            'group_2': group_2,
+            'method_used': 'hierarchical_split'
+        }
+
+        return new_assignments, metadata
