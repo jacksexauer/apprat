@@ -368,9 +368,13 @@ class MainWindow(QMainWindow):
             method = self.similarity_method.currentText()
             top_n = self.top_n_spinner.value()
 
+            # Clear cached similarity matrix to force recalculation with new method
+            self.clustering_engine._similarity_matrix = None
+
             rankings = self.clustering_engine.get_proximity_rankings(method, top_n)
 
-            # Display in table
+            # Clear and refresh the table
+            self.similarity_table.clearContents()
             self.similarity_table.setRowCount(len(rankings))
             self.similarity_table.setColumnCount(3)
             self.similarity_table.setHorizontalHeaderLabels(
